@@ -16,6 +16,7 @@ class ViewController: UITableViewController {
         super.viewDidLoad()
         
         navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(promptForAnswer))
+        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .refresh, target: self, action: #selector(startGame))
         
         if let startWordsURL = Bundle.main.url(forResource: "start", withExtension: "txt") {
             if let startWords = try? String(contentsOf: startWordsURL) {
@@ -27,10 +28,34 @@ class ViewController: UITableViewController {
             allWords = ["silkworm"]
         }
         
-        startGame()
+        let defaults = UserDefaults.standard
+        if let gameProgress = defaults.object(forKey: "usedWords") as? Data {
+            if let startWord = defaults.object(forKey: "startingWord") as? Data {
+                let decoder = JSONDecoder()
+                do {
+                    usedWords = try decoder.decode([String].self, from: gameProgress)
+                    title = try decoder.decode(String.self, from: startWord)
+                } catch {
+                    print("Failed to load starting words.")
+                }
+            }
+        } else {
+            startGame()
+        }
+        
+        if let startWord = defaults.object(forKey: "startingWord") as? Data {
+            let decoder = JSONDecoder()
+            do {
+                title = try decoder.decode(String.self, from: startWord)
+            } catch {
+                print("Failed to load starting words.")
+            }
+        } else {
+            startGame()
+        }
     }
     
-    func startGame() {
+    @objc func startGame() {
         title = allWords.randomElement()
         usedWords.removeAll()
         tableView.reloadData()
@@ -42,7 +67,7 @@ class ViewController: UITableViewController {
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "Word", for: indexPath)
-        cell.textLabel?.text = usedWords[indexPath.row]
+        cell.textLabel?.text = usedWords[indexPath.row].lowercased()
         return cell
     }
     
@@ -61,35 +86,31 @@ class ViewController: UITableViewController {
     
     func submit(_ answer: String) {
         let lowerAnswer = answer.lowercased()
-        let errorTitle: String
-        let errorMessage: String
         
         if isReal(word: lowerAnswer) {
             if isPossible(word: lowerAnswer) {
                 if isOriginal(word: lowerAnswer) {
-                    usedWords.insert(answer, at: 0)
-                    
-                    let indexPath = IndexPath(row: 0, section: 0)
-                    tableView.insertRows(at: [indexPath], with: .automatic)
-                    
-                    return
+                    if lowerAnswer == title {
+                        showErrorMessage(title: "Answer is same as starting word", message: "Please try a different word that isn't the same as the starting word.")
+                    } else {
+                        usedWords.insert(lowerAnswer, at: 0)
+                        
+                        let indexPath = IndexPath(row: 0, section: 0)
+                        tableView.insertRows(at: [indexPath], with: .automatic)
+                        saveProgress()
+                        
+                        return
+                    }
                 } else {
-                    errorTitle = "Word already used"
-                    errorMessage = "Try to create a new word not already used."
+                    showErrorMessage(title: "Word already used", message: "Try to create a new word not already used.")
                 }
             } else {
                 guard let title = title else { return }
-                errorTitle = "Word not possible"
-                errorMessage = "That word cannot be formed from \(title.lowercased())."
+                showErrorMessage(title: "Word not possible", message: "That word cannot be formed from \(title.lowercased()).")
             }
         } else {
-            errorTitle = "Word not recognized"
-            errorMessage = "Please check your spelling and try again."
+            showErrorMessage(title: "Word not recognized", message: "Please check your spelling and try again.")
         }
-        
-        let ac = UIAlertController(title: errorTitle, message: errorMessage, preferredStyle: .alert)
-        ac.addAction(UIAlertAction(title: "OK", style: .default))
-        present(ac, animated: true)
     }
     
     func isPossible(word: String) -> Bool {
@@ -102,7 +123,7 @@ class ViewController: UITableViewController {
                 return false
             }
         }
-        
+
         return true
     }
     
@@ -111,11 +132,34 @@ class ViewController: UITableViewController {
     }
     
     func isReal(word: String) -> Bool {
-        let checker = UITextChecker()
-        let range = NSRange(location: 0, length: word.utf16.count)
-        let misspelledRange = checker.rangeOfMisspelledWord(in: word, range: range, startingAt: 0, wrap: false, language: "en")
-        return misspelledRange.location == NSNotFound
+        if word.count > 3 {
+            let checker = UITextChecker()
+            let range = NSRange(location: 0, length: word.utf16.count)
+            let misspelledRange = checker.rangeOfMisspelledWord(in: word, range: range, startingAt: 0, wrap: false, language: "en")
+            return misspelledRange.location == NSNotFound
+        } else {
+            showErrorMessage(title: "Word is too short", message: "Please choose a word longer than three letters.")
+            return false
+        }
     }
-
+    
+    func showErrorMessage(title: String, message: String) {
+        let ac = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        ac.addAction(UIAlertAction(title: "OK", style: .default))
+        present(ac, animated: true)
+    }
+    
+    func saveProgress() {
+        let encoder = JSONEncoder()
+        if let saveData = try? encoder.encode(usedWords) {
+            if let word = try? encoder.encode(title) {
+                let defaults = UserDefaults.standard
+                defaults.set(word, forKey: "startingWord")
+                defaults.set(saveData, forKey: "usedWords")
+            }
+        } else {
+            print("Unable to save used words.")
+        }
+    }
 }
 
